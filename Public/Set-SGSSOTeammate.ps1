@@ -1,56 +1,81 @@
 Function Set-SGSSOTeammate {
     <#
         .Synopsis
-        This cmdlet allows you to modify an existing SSO Teammate.
+        This cmdlet allows you to modify an existing SendGrid SSO Teammate.
 
         .DESCRIPTION
-        Finds the specified zone in AWS Route 53, if it exists, and adds a record with the specified info to that
-        zone. If the zone doesn't exist, then the command creates the zone and adds the record to it.
+        This cmdlet allows you to modify an existing SendGrid SSO Teammate.
 
-        .PARAMETER RecordName
-        The name field of the DNS record.
+        .PARAMETER ApiKey
+        The API Key used to authenticate this request.
 
-        .PARAMETER Zone
-        The name of the zone under which this record wil be placed.
+        .PARAMETER OnBehalfOf
+        The username or account ID of the subuser on behalf of which you wish to execute commands.
 
-        .PARAMETER RecordType
-        The type of the DNS record which will be added to the zone. Acceptable values are: A|AAAA|CNAME|MX|SRV|TXT
+        .PARAMETER Username
+        The username of the teammate that you wish to edit. 
 
-        .PARAMETER RecordValues
-        The actual values to be placed in the DNS record.
+        .PARAMETER FirstName
+        Use this parameter to update the first name of a teammate.
 
-        .PARAMETER TTL
-        The Time To Live for the record to be added. If not present, 300 is used by default.
+        .PARAMETER LastName
+        Use this parameter to update the last name of a teammate.
 
-        .PARAMETER DelegationSetID
-        This can be used to set the delegation set for every record processed on this command
-        If you specificy this parameter and the zone exists on another delegation set,
-        we will override that existing zone and remake it
+        .PARAMETER IsAdmin
+        Use this switch grant full admin access to the specified teammate.
 
-        .PARAMETER AWSProfile
-        Dynamically generated parameter that populates intellisense based upon the AWS profiles installed on your 
-        machine. If you don't see any intellisense options, then you need to use the Set-AWSCredential command to 
-        setup an AWS Credential Profile.
+        .PARAMETER Persona
+        Use this parameter to update the persona of a teammate. Valid values are: accountant, developer, marketer, 
+        observer.
 
-        .PARAMETER Tags
-        This parameter accepts one or more objects containing tag details and converts them into tags which are 
-        applied to the Route 53 zone. The object model is as follows:
-        
-            [PSCustomObject]@{
-                Key='[My Tag Name]'
-                Value='[My Tag Contents]'
-            }
+        .PARAMETER Scopes
+        Use this parameter to update the scopes of a teammate. For a list of valid scopes, use Get-SGScopes.
 
-        .PARAMETER CreateZone
-        This switch must be present to complete actions that require the creation of a new zone.
+        .PARAMETER HasRestrictedSubuserAccess
+        Use this switch to enable restricted subuser access for the specified teammate. If this switch is used, you 
+        must provide a value for the SubUserAccess parameter.
+
+        .PARAMETER SubUserAccess
+        Use this parameter to specify restricted access to one or multiple subusers. This parameter accepts an array of 
+        objects with the following properties: id, permission_type, and scopes. Below is an example of a valid object:
+
+        @{
+            id = '12345678'
+            permission_type = 'Restricted'
+            scopes = @('mail.send', 'alerts.create')
+        }
 
         .EXAMPLE
-        New-R53ResourceRecordSet -RecordName email -Zone example.com -RecordType MX -RecordValues '10 mx.emailprovider.com' -TTL 600 -AWSProfile exampleprofile
+        # Update a teammate's first and last name in the main account.
+        Set-SGSSOTeammate -ApiKey 'SG.12-************' -Username 'testuser' -FirstName 'Test' -LastName 'User'
+
+        .EXAMPLE
+        # Modify the permission scopes of a teammate in a subuser account.
+        Set-SGSSOTeammate -ApiKey 'SG.12-************' -Username 'testuser' -OnBehalfOf 'examplesubuser' -Scopes @('mail.send', 'alerts.create')
+
+        .EXAMPLE
+        # Grant a teammate restricted subuser access to 2 subusers, granting the mail.send scope in each.
+        $subuserAccess = @(
+            @{
+                id = '12345678'
+                permission_type = 'Restricted'
+                scopes = @('mail.send')
+            },
+            @{
+                id = '87654321'
+                permission_type = 'Restricted'
+                scopes = @('mail.send')
+            }
+        )
+        Set-SGSSOTeammate -ApiKey 'SG.12-************' -Username 'testuser' -HasRestrictedSubuserAccess -SubuserAccess $subuserAccess
     #>
     [CmdletBinding(DefaultParameterSetName='default')]
     param (
         [Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName)]
         [string]$ApiKey,
+
+        [Parameter(Mandatory=$false)]
+        [string]$OnBehalfOf,
 
         [Parameter(Mandatory=$true,Position=1,ValueFromPipelineByPropertyName)]
         [string]$Username,
@@ -61,24 +86,21 @@ Function Set-SGSSOTeammate {
         [Parameter(Mandatory=$false,Position=3,ValueFromPipelineByPropertyName)]
         [string]$LastName,
 
-        [Parameter(Mandatory=$false)]
-        [string]$SubuserUsername,
-
         [Parameter(Mandatory=$false,ParameterSetName='Admin')]
         [switch]$IsAdmin,
 
         [Parameter(Mandatory=$false,ParameterSetName='RestrictedPersonaAccess')]
         [ValidateSet('accountant','developer','marketer','observer')]
-        [string]$persona,
+        [string]$Persona,
 
         [Parameter(Mandatory=$false,ParameterSetName='RestrictedScopeAccess')]
-        [ValidateSet([SendgridScope])]
-        [string[]]$scopes,
+        [string[]]$Scopes,
 
         [Parameter(Mandatory=$false,ParameterSetName='subuser_access')]
         [switch]$HasRestrictedSubuserAccess
     )
 
+    # This is the dynamic parameter block. It will only be used if the HasRestrictedSubuserAccess switch is used.
     DynamicParam
     {
         $paramDictionary = New-Object -Type System.Management.Automation.RuntimeDefinedParameterDictionary
@@ -101,48 +123,64 @@ Function Set-SGSSOTeammate {
     }
 
     Begin {
-        $Uri = "$($env:SGAPIBaseUri)/sso/teammates/$($Username)"
+        $Endpoint = "/sso/teammates/$($Username)"
 
         $Headers = @{
             Authorization = "Bearer $($ApiKey)"
             'Content-Type' = 'application/json'
         }
 
-        if (![string]::IsNullOrWhiteSpace($SubuserUsername)) {
-            $Headers.Add('on-behalf-of', $SubuserUsername)
+        # If the OnBehalfOf parameter is used, we need to add the appropriate header.
+        if (![string]::IsNullOrWhiteSpace($OnBehalfOf)) {
+            if($OnBehalfOf -is [int]) {
+                $Headers.Add('on-behalf-of', "account-id $($OnBehalfOf)")
+            } else {
+                $Headers.Add('on-behalf-of', "$($OnBehalfOf)")
+            }
         }
 
+        # If the HasRestrictedSubuserAccess switch is used, we need to add the appropriate body.
         $Body = @{
             has_restricted_subuser_access = $HasRestrictedSubuserAccess.IsPresent
         }
 
+        # If the HasRestrictedSubuserAccess switch is used, we need to add the subuser access array to the body.
         if ($HasRestrictedSubuserAccess.IsPresent) {
             $Body.Add('subuser_access', $PSBoundParameters.SubUserAccess)
         }
 
+        # If the FirstName parameter is used, we need to add the appropriate body.
         if (![string]::IsNullOrWhiteSpace($FirstName)) {
             $Body.Add('first_name', $FirstName)
         }
 
+        # If the LastName parameter is used, we need to add the appropriate body.
         if (![string]::IsNullOrWhiteSpace($LastName)) {
             $Body.Add('last_name', $LastName)
         }
 
+        # If the IsAdmin switch is used, we need to add the appropriate body.
         if ($IsAdmin.IsPresent) {
             $Body.Add('is_admin', $IsAdmin.IsPresent)
         }
 
+        # If the Persona parameter is used, we need to add the appropriate body.
         if (![string]::IsNullOrWhiteSpace($persona)) {
             $Body.Add('persona', $persona)
         }
 
+        # If the Scopes parameter is used, we need to add the appropriate body.
         if ($scopes) {
             $Body.Add('scopes', $scopes)
         }
     }
 
     Process {
-        Invoke-RestMethod -UseBasicParsing -Uri $Uri -Method PATCH -Headers $Headers -Body (ConvertTo-Json $Body -Depth 10)
+        Try {
+            Invoke-SGApiRequest -Endpoint $Endpoint -Method 'PATCH' -Headers $Headers -Body $Body -ErrorAction Stop
+        } Catch {
+            Throw $_
+        }
     }
 
     End {}    

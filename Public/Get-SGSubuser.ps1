@@ -1,4 +1,30 @@
 Function Get-SGSubuser {
+    <#
+        .Synopsis
+        This cmdlet allows you to retrieve a SendGrid Subuser.
+
+        .DESCRIPTION
+        This cmdlet allows you to retrieve a SendGrid Subuser.
+
+        .PARAMETER ApiKey
+        The API Key used to authenticate this request.
+
+        .PARAMETER Username
+        The username of the subuser you wish to retrieve.
+
+        .PARAMETER All
+        Retrieve all subusers. This will return an array of all subusers in the account.
+
+        .PARAMETER Limit
+        The number of results to return. This is only required if you are manually paging through results.
+
+        .PARAMETER Offset
+        The offset of the results to return. This is only required if you are manually paging through results.
+
+        .EXAMPLE
+        # Retrieve a single subuser.
+        Get-SGSubuser -ApiKey 'SG.12-************' -Username 'example'
+    #>
     [CmdletBinding(DefaultParameterSetName='default')]
     param (
         [Parameter(Mandatory=$true)]
@@ -7,13 +33,7 @@ Function Get-SGSubuser {
         [Parameter(Mandatory=$false, ParameterSetName='SingleSubuser')]
         [string]$Username,
 
-        [Parameter(Mandatory=$true, ParameterSetName='ManualPaging')]
-        [int]$Limit,
-
-        [Parameter(Mandatory=$true, ParameterSetName='ManualPaging')]
-        [int]$Offset,
-
-        [Parameter(Mandatory=$false, ParameterSetName='MultipleSubusers')]
+        [Parameter(Mandatory=$false, ParameterSetName='AllSubusers')]
         [switch]$All
     )
 
@@ -22,7 +42,7 @@ Function Get-SGSubuser {
             Authorization = "Bearer $($ApiKey)"
         }
 
-        $Uri = "$($env:SGAPIBaseUri)/subusers"
+        $Endpoint = "/subusers"
 
         if (![string]::IsNullOrWhiteSpace($Username)) {
             $Uri += "?username=$($Username)"
@@ -34,28 +54,10 @@ Function Get-SGSubuser {
     }
 
     Process {
-        $Response = Invoke-RestMethod -UseBasicParsing -Uri $Uri -Method Get -Headers $Headers
-
-        if ($All.IsPresent) {
-            $ReturnArray = [System.Collections.ArrayList]@()
-            $AllOffset = 500
-
-            Write-Verbose "Adding the first 500 results to the array"
-            $ReturnArray.AddRange($Response)
-
-            do {
-                Write-Verbose "Entering loop to get the next 500 results"
-                $Response = Get-SGSubuser -ApiKey $ApiKey -Limit 500 -Offset $AllOffset
-                Write-Verbose "Response count: $($Response.count)"
-                if ($Response.count -gt 0) {
-                    [void]$ReturnArray.AddRange($Response)
-                    $AllOffset += 500
-                }
-            } until ($Response.count -lt 500)
-
-            return $ReturnArray
-        } else {
-            return $Response
+        Try {
+            Invoke-SGApiRequest -Endpoint $Endpoint -Method 'GET' -Headers $Headers -Limit 5 -Offset 0 -AutoPaginate $All.IsPresent
+        } Catch {
+            Throw $_
         }
     }
 

@@ -3,14 +3,14 @@
 Function Get-ErrorResponseBody {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, Position=0, ValueFromPipeline=$true)]
         [System.Management.Automation.ErrorRecord]$ExceptionObj
     )
 
     Begin {}
 
     Process {
-        if ($PSVersionTable.PSVersion.Major -lt 6) { 
+        if ($PSVersionTable.PSVersion.Major -gt 6) { 
             $result = $ExceptionObj.Exception.Response.GetResponseStream()
             $reader = New-Object System.IO.StreamReader($result)
             $reader.BaseStream.Position = 0
@@ -23,9 +23,8 @@ Function Get-ErrorResponseBody {
                     error = $reader.ReadToEnd()
                 }
             }
-        }
-        else {
-            $Error.ErrorDetails.Message
+        } else {
+            $ExceptionObj.ErrorDetails.Message
         }
     }
 
