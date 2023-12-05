@@ -74,7 +74,7 @@ function Invoke-SGApiRequest {
                 return $Response
             }
         } catch {            
-            $RetryInSeconds = [Math]::Floor(($origin.AddSeconds($_.Exception.Response.Headers['X-Ratelimit-Reset']) - (Get-Date)).TotalSeconds)
+            $RetryInSeconds = [Math]::Floor(($EpochOrigin.AddSeconds($_.Exception.Response.Headers['X-Ratelimit-Reset']) - (Get-Date)).TotalSeconds)
             $RateLimit = $_.Exception.Response.Headers['X-Ratelimit-Limit']
 
             switch ($_.Exception.Response.StatusCode.Value__) {
@@ -90,7 +90,7 @@ function Invoke-SGApiRequest {
 
                 default {
                     $Errors = ConvertFrom-Json -InputObject (Get-ErrorResponseBody $_)
-                    
+
                     foreach ($Err in $Errors.errors) {
                         if (![string]::IsNullOrWhiteSpace($Err.error_id)) {
                             $ErrorId = $Err.error_id
