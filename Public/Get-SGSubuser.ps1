@@ -45,17 +45,24 @@ Function Get-SGSubuser {
         $Endpoint = "/subusers"
 
         if (![string]::IsNullOrWhiteSpace($Username)) {
-            $Uri += "?username=$($Username)"
-        } elseif ($All.IsPresent) {
-            $Uri += "?limit=500"
-        } elseif ($Offset -and $Limit) {
-            $Uri += "?limit=$($Limit)&offset=$($Offset)"
+            $Endpoint += "?username=$($Username)"
+        }
+
+        $ApiSplat = @{
+            Endpoint = $Endpoint
+            Method = 'GET'
+            Headers = $Headers
+        }
+        
+        if ($All.IsPresent) {
+            $ApiSplat.Add('Limit', 500)
+            $ApiSplat.Add('AutoPaginate', $true)
         }
     }
 
     Process {
         Try {
-            Invoke-SGApiRequest -Endpoint $Endpoint -Method 'GET' -Headers $Headers -Limit 5 -Offset 0 -AutoPaginate $All.IsPresent
+            Invoke-SGApiRequest @ApiSplat
         } Catch {
             Throw $_
         }
